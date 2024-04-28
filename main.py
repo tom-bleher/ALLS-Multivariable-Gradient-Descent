@@ -12,9 +12,11 @@ from pyqtgraph.Qt import QtGui
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-MIRROR_FILE_PATH = r'mirror_command/mirror_change.txt'
-DISPERSION_FILE_PATH = r'dazzler_command/dispersion.txt'
+# there are the txt file the code adjusts and uploads 
+MIRROR_FILE_PATH = r'dm_parameters.txt'
+DISPERSION_FILE_PATH = r'dazzler_parameters.txt'
 
+# open and read the txt files and read the initial values
 with open(MIRROR_FILE_PATH, 'r') as file:
     content = file.read()
 mirror_values = list(map(int, content.split()))
@@ -40,26 +42,31 @@ class BetatronApplication(QtWidgets.QApplication):
     def __init__(self, *args, **kwargs):
         super(BetatronApplication, self).__init__(*args, **kwargs)
 
-        self.mean_count_per_n_images  = 0
-        self.count_grad = 0
-        self.n_images = 5
-        self.n_images_dir_run_count = 0
-        self.n_images_run_count = 0
-        self.run_count = 0
-        self.n_images_count_sum = 0  
+        # for how many images should the mean be taken for
+        self.image_group = 5
+
+        self.mean_count_per_image_group  = 0
+        self.image_group_dir_images_processed = 0
+        self.image_groups_processed = 0
+        self.images_processed = 0
+        self.image_group_count_sum = 0  
         self.count_history = np.array([])
+
+        # set learning rates for the different optimization variables
         self.focus_learning_rate = 0.1
         self.second_dispersion_learning_rate = 0.1
         self.third_dispersion_learning_rate = 0.1
 
-        self.IMG_PATH = r'C:\Users\blehe\Desktop\Betatron_multi\images'
-        self.image_files = [os.path.join(self.IMG_PATH, filename) for filename in os.listdir(self.IMG_PATH) if filename.endswith('.png') and os.path.isfile(os.path.join(self.IMG_PATH, filename))]
+        # image path (should match to path specified in SpinView)
+        self.IMG_PATH = r'images'
 
-        self.printed_message = False
+        # setup tracking for new images
+        self.waiting_for_images_printed = False
         self.initialize_image_files()
 
     # ------------ Plotting ------------ #
 
+        # initialize lists to keep track of optimization process
         self.third_dispersion_der_history = np.array([])
         self.second_dispersion_der_history = np.array([])
         self.focus_der_history = np.array([])
@@ -67,12 +74,11 @@ class BetatronApplication(QtWidgets.QApplication):
 
         self.iteration_data = np.array([])
         self.der_iteration_data = np.array([])
-        self.count_data = np.array([])
         
         self.count_plot_widget = pg.PlotWidget()
         self.count_plot_widget.setWindowTitle('count optimization')
         self.count_plot_widget.setLabel('left', 'count')
-        self.count_plot_widget.setLabel('bottom', 'n_images iteration')
+        self.count_plot_widget.setLabel('bottom', 'image_group iteration')
         self.count_plot_widget.showGrid(x=True, y=True)
         self.count_plot_widget.show()
 
@@ -81,7 +87,7 @@ class BetatronApplication(QtWidgets.QApplication):
 
         layout = self.main_plot_window.addLayout(row=0, col=0)
 
-        self.count_plot_widget = layout.addPlot(title='count vs n_images iteration')
+        self.count_plot_widget = layout.addPlot(title='count vs image_group iteration')
         self.focus_plot = layout.addPlot(title='count_focus_derivative')
         self.second_dispersion_plot = layout.addPlot(title='count_second_dispersion_derivative')
         self.third_dispersion_plot = layout.addPlot(title='count_third_dispersion_derivative')
@@ -106,35 +112,42 @@ class BetatronApplication(QtWidgets.QApplication):
     # ------------ Deformable mirror ------------ #
 
         # init -150
-        self.MIRROR_HOST = "192.168.200.3"
-        self.MIRROR_USER = "Utilisateur"
-        self.MIRROR_PASSWORD = "alls"    
+        # connect to the dazzler
+        #self.mirror_ftp = FTP()
+        #self.mirror_ftp.connect(MIRROR_HOST="192.168.200.3")
+        #self.mirror_ftp.login(MIRROR_USER="Utilisateur", MIRROR_PASSWORD="alls")
 
+        # set initial focus value from txt flle and initialize focus history list
         self.initial_focus = mirror_values[0]
         self.focus_history = np.array([], dtype=int)    
-        # self.FOCUS_LOWER_BOUND = max(self.initial_focus - 20, -200)
-        # self.FOCUS_UPPER_BOUND = min(self.initial_focus + 20, 200)
+        
+        # define global and local bounds for the deformable mirror 
+        self.FOCUS_LOWER_BOUND = max(self.initial_focus - 20, -200)
+        self.FOCUS_UPPER_BOUND = min(self.initial_focus + 20, 200)
 
-        self.FOCUS_LOWER_BOUND = -999999
-        self.FOCUS_UPPER_BOUND = 999999
+        #self.FOCUS_LOWER_BOUND = -999999
+        #self.FOCUS_UPPER_BOUND = 999999
 
-        self.tolerance = 100
+        # set count change tolerance under which the program will consider the case optimized 
+        self.count_change_tolerance = 10
         
     # ------------ Dazzler ------------ #
 
-        self.DAZZLER_HOST = "192.168.58.7"
-        self.DAZZLER_USER = "fastlite"
-        self.DAZZLER_PASSWORD = "fastlite"
+        # setup ftp connection to mirror
+        #self.dazzler_ftp = FTP()
+        #self.dazzler_ftp.connect(MIRROR_HOST="192.168.58.7")
+        #self.dazzler_ftp.login(MIRROR_USER="fastlite", MIRROR_PASSWORD="fastlite")
 
         # 36100 initial 
         self.initial_second_dispersion = dispersion_values[0] 
         self.second_dispersion_history = np.array([], dtype=int)
-        # self.SECOND_DISPERSION_LOWER_BOUND = max(self.initial_second_dispersion - 500, 30000)
-        # self.SECOND_DISPERSION_UPPER_BOUND = min(self.initial_second_dispersion + 500, 40000)
 
-        self.SECOND_DISPERSION_LOWER_BOUND = -999999
-        self.SECOND_DISPERSION_UPPER_BOUND = 999999
+        # define global and local bounds for the dazzler
+        self.SECOND_DISPERSION_LOWER_BOUND = max(self.initial_second_dispersion - 500, 30000)
+        self.SECOND_DISPERSION_UPPER_BOUND = min(self.initial_second_dispersion + 500, 40000)
 
+        #self.SECOND_DISPERSION_LOWER_BOUND = -999999
+        #self.SECOND_DISPERSION_UPPER_BOUND = 999999
 
         # -27000 initial
         self.initial_third_dispersion = dispersion_values[1] 
@@ -156,79 +169,95 @@ class BetatronApplication(QtWidgets.QApplication):
         self.file_observer.start()
 
         self.random_direction = [random.choice([-1, 1]) for _ in range(4)]
-
-    def periodic_processing(self):
-        self.process_images(self.image_files)
             
     def initialize_image_files(self):
-        if not self.printed_message:
+        if not self.waiting_for_images_printed:
             print("Waiting for images ...")
-            self.printed_message = True
+            self.waiting_for_images_printed = True
+        
+        # define a list to store the paths of new files
+        self.new_files = [] 
+        
+        # iterate over each filename in the IMG_PATH directory
+        for filename in os.listdir(self.IMG_PATH):
+            # check if the filename ends with '.tiff'
+            if filename.endswith('.tiff'):
+                # add the file's path to the new_files list
+                self.new_files.append(os.path.join(self.IMG_PATH, filename))
 
-        new_files = [os.path.join(self.IMG_PATH, filename) for filename in os.listdir(self.IMG_PATH) if filename.endswith('.png') and os.path.isfile(os.path.join(self.IMG_PATH, filename))]
+        if self.new_files:
+            self.image_files = self.new_files
 
-        if new_files:
-            self.image_files = new_files
-
+    # method used to send the new values to the mirror and dazzler computers via FTP
     def upload_files(self):
-        mirror_ftp = FTP()
-        dazzler_ftp = FTP()
-
-        mirror_ftp.connect(host=self.MIRROR_HOST)
-        mirror_ftp.login(user=self.MIRROR_USER, passwd=self.MIRROR_PASSWORD)
-
-        dazzler_ftp.connect(host=self.DAZZLER_HOST)
-        dazzler_ftp.login(user=self.DAZZLER_USER, passwd=self.DAZZLER_PASSWORD)
-
+ 
         mirror_files = [os.path.basename(MIRROR_FILE_PATH)]
         dazzler_files = [os.path.basename(DISPERSION_FILE_PATH)]
 
-        for mirror_file_name in mirror_files:
-            for dazzler_file_name in dazzler_files:
-                focus_file_path = MIRROR_FILE_PATH
-                dispersion_file_path = DISPERSION_FILE_PATH
+        # try to send the file via ftp connection
+        try:
 
-                if os.path.isfile(focus_file_path) and os.path.isfile(dispersion_file_path):
-                    copy_mirror_IMG_PATH = os.path.join('mirror_command', f'copy_{mirror_file_name}')
-                    copy_dazzler_IMG_PATH = os.path.join('dazzler_command', f'copy_{dazzler_file_name}')
+            for mirror_file_name in mirror_files:
+                for dazzler_file_name in dazzler_files:
+                    focus_file_path = MIRROR_FILE_PATH
+                    dispersion_file_path = DISPERSION_FILE_PATH
 
-                    try:
-                        os.makedirs(os.path.dirname(copy_mirror_IMG_PATH))
-                        os.makedirs(os.path.dirname(copy_dazzler_IMG_PATH))
-                    except OSError:
-                        pass
+                    if os.path.isfile(focus_file_path) and os.path.isfile(dispersion_file_path):
+                        copy_mirror_IMG_PATH = os.path.join('mirror_command', f'copy_{mirror_file_name}')
+                        copy_dazzler_IMG_PATH = os.path.join('dazzler_command', f'copy_{dazzler_file_name}')
 
-                    shutil.copy(focus_file_path, copy_mirror_IMG_PATH)
-                    shutil.copy(dispersion_file_path, copy_dazzler_IMG_PATH)
+                        try:
+                            os.makedirs(os.path.dirname(copy_mirror_IMG_PATH))
+                            os.makedirs(os.path.dirname(copy_dazzler_IMG_PATH))
+                        except OSError:
+                            pass
 
-                    with open(copy_mirror_IMG_PATH, 'rb') as local_file:
-                        mirror_ftp.storbinary(f'STOR {mirror_file_name}', local_file)
-                        print(f"Uploaded to mirror FTP: {mirror_file_name}")
+                        shutil.copy(focus_file_path, copy_mirror_IMG_PATH)
+                        shutil.copy(dispersion_file_path, copy_dazzler_IMG_PATH)
 
-                    with open(copy_dazzler_IMG_PATH, 'rb') as local_file:
-                        dazzler_ftp.storbinary(f'STOR {dazzler_file_name}', local_file)
-                        print(f"Uploaded to dazzler FTP: {dazzler_file_name}")
+                        with open(copy_mirror_IMG_PATH, 'rb') as local_file:
+                            self.mirror_ftp.storbinary(f'STOR {mirror_file_name}', local_file)
+                            print(f"Uploaded to mirror FTP: {mirror_file_name}")
 
-                    os.remove(copy_mirror_IMG_PATH)
-                    os.remove(copy_dazzler_IMG_PATH)
+                        with open(copy_dazzler_IMG_PATH, 'rb') as local_file:
+                            self.dazzler_ftp.storbinary(f'STOR {dazzler_file_name}', local_file)
+                            print(f"Uploaded to dazzler FTP: {dazzler_file_name}")
 
-    def calc_xray_count(self, image_path):
+                        os.remove(copy_mirror_IMG_PATH)
+                        os.remove(copy_dazzler_IMG_PATH)
+
+        except Exception as e:
+            print(f"Error in FTP upload: {e}")
+    
+    # method to calculate count (by its brightness proxy)   
+    def calc_count_per_image(self, image_path):
+    
+        # read the image in 16 bit
         original_image = cv2.imread(image_path, cv2.IMREAD_UNCHANGED | cv2.IMREAD_ANYDEPTH)
-        median_filtered_image = cv2.medianBlur(original_image, 5)
-        img_mean_count = median_filtered_image.mean()
+        
+        # apply median blur on image
+        median_blured_image = cv2.medianBlur(original_image, 5)
+        
+        # calculate mean brightness of blured image
+        self.single_img_mean_count = median_blured_image.mean()
+        
+        # return the count (brightness of image)
+        return self.single_img_mean_count
 
-        return img_mean_count
-
+    # initial method to start optimization process
     def initial_optimize(self):
 
+        # take random direction for each of the variables
         self.new_focus = self.focus_history[-1] + self.random_direction[0]
         self.new_second_dispersion = self.second_dispersion_history[-1] + self.random_direction[1]
         self.new_third_dispersion = self.third_dispersion_history[-1] + self.random_direction[2]
  
+        # the values have to be rounded and clipped due to physical constraints
         self.new_focus = int(round(np.clip(self.new_focus, self.FOCUS_LOWER_BOUND, self.FOCUS_UPPER_BOUND)))
         self.new_second_dispersion = int(round(np.clip(self.new_second_dispersion, self.SECOND_DISPERSION_LOWER_BOUND, self.SECOND_DISPERSION_UPPER_BOUND)))
         self.new_third_dispersion = int(round(np.clip(self.new_third_dispersion, self.THIRD_DISPERSION_LOWER_BOUND, self.THIRD_DISPERSION_UPPER_BOUND)))
 
+        # add variables to respective lists
         self.focus_history = np.append(self.focus_history, [self.new_focus])
         self.second_dispersion_history = np.append(self.second_dispersion_history, [self.new_second_dispersion])
         self.third_dispersion_history = np.append(self.third_dispersion_history, [self.new_third_dispersion])
@@ -238,21 +267,31 @@ class BetatronApplication(QtWidgets.QApplication):
         dispersion_values[1] = self.new_third_dispersion
 
     def calc_derivatives(self):
+        
+        # take derivative for every parameter
         self.count_focus_der = (self.count_history[-1] - self.count_history[-2]) / (self.focus_history[-1] -self.focus_history[-2])
         self.count_second_dispersion_der = (self.count_history[-1] - self.count_history[-2]) / (self.second_dispersion_history[-1] - self.second_dispersion_history[-2])
         self.count_third_dispersion_der = (self.count_history[-1] - self.count_history[-2]) / (self.third_dispersion_history[-1] - self.third_dispersion_history[-2])
 
+        # add the derivatives to according history lists for plotting
         self.focus_der_history = np.append(self.focus_der_history, [self.count_focus_der])
         self.second_dispersion_der_history = np.append(self.second_dispersion_der_history, [self.count_second_dispersion_der])
         self.third_dispersion_der_history = np.append(self.third_dispersion_der_history, [self.count_third_dispersion_der])
 
+        # add all derivatives for different parameters
         self.total_gradient = (self.focus_der_history[-1] + self.second_dispersion_der_history[-1] + self.third_dispersion_der_history[-1])
 
         self.total_gradient_history = np.append(self.total_gradient_history, self.total_gradient)
-        self.der_iteration_data = np.append(self.der_iteration_data, self.n_images_dir_run_count)
+        self.der_iteration_data = np.append(self.der_iteration_data, self.image_group_dir_images_processed)
 
-        return {"focus":self.count_focus_der,"second_dispersion":self.count_second_dispersion_der,"third_dispersion":self.count_third_dispersion_der}
+        # return dicts with derivatives
+        return {
+            "focus":self.count_focus_der,
+            "second_dispersion":self.count_second_dispersion_der,
+            "third_dispersion":self.count_third_dispersion_der
+            }
 
+    # main optimization block for gradient descent 
     def optimize_count(self):
         derivatives = self.calc_derivatives()
 
@@ -280,47 +319,62 @@ class BetatronApplication(QtWidgets.QApplication):
             self.third_dispersion_history = np.append(self.third_dispersion_history, self.new_third_dispersion)
             dispersion_values[1] = self.new_third_dispersion
         
+        # if the change in all variables is less than one (we can not take smaller steps thus this is the optimization boundry)
         if (
             np.abs(self.third_dispersion_learning_rate * derivatives["third_dispersion"]) < 1 and
             np.abs(self.second_dispersion_learning_rate * derivatives["second_dispersion"]) < 1 and
             np.abs(self.focus_learning_rate * derivatives["focus"]) < 1
         ):
-            print("convergence achieved")
+            print("Convergence achieved")
 
-        if np.abs(self.count_history[-1] - self.count_history[-2]) <= self.tolerance:
-            print("convergence achieved")
+        # if the count is not changing much this means that we are near the peak 
+        if np.abs(self.count_history[-1] - self.count_history[-2]) <= self.count_change_tolerance:
+            print("Convergence achieved")
 
     def process_images(self, new_images):
         self.initialize_image_files() 
         new_images = [image_path for image_path in new_images if os.path.exists(image_path)]
         new_images.sort(key=os.path.getctime)
-
+        
+        # loop over all new images 
         for image_path in new_images:
-            relative_path = os.path.relpath(image_path, self.IMG_PATH)
-            img_mean_count = self.calc_xray_count(image_path)
-            self.n_images_count_sum += np.sum(img_mean_count)
+            img_mean_count = self.calc_count_per_image(image_path)
+            self.image_group_count_sum += np.sum(img_mean_count)
 
-            self.run_count += 1
+            # keep track of the times the program ran (number of images we processed)
+            self.images_processed += 1
 
-            if self.run_count % self.n_images == 0:
-                self.mean_count_per_n_images = np.mean(img_mean_count)
-                self.count_history = np.append(self.count_history, self.mean_count_per_n_images)
-                self.n_images_run_count += 1
-                self.iteration_data = np.append(self.iteration_data, self.n_images_run_count)
+            # conditional to check if the desired numbers of images to mean was processed
+            if self.images_processed % self.image_group == 0:
+                # take the mean count for the number of images set
+                self.mean_count_per_image_group = np.mean(img_mean_count)
+                # append to count_history list to keep track of count through the optimization process
+                self.count_history = np.append(self.count_history, self.mean_count_per_image_group)
 
-                if self.n_images_run_count == 1:
+                # update count for 'images_group' processed (number of image groups processed)
+                self.image_groups_processed += 1
+                self.iteration_data = np.append(self.iteration_data, self.image_groups_processed)
+
+                # if we are in the first time where the algorithm needs to adjust the value
+                if self.image_groups_processed == 1:
                     print('-------------')       
+
+                    # add initial values to lists
                     self.focus_history = np.append(self.focus_history, self.initial_focus)      
                     self.second_dispersion_history = np.append(self.second_dispersion_history, self.initial_second_dispersion)                   
                     self.third_dispersion_history = np.append(self.third_dispersion_history, self.initial_third_dispersion)
-                                      
+                    
+                    # print to help track the evolution of the system
                     print(f"initial values are: focus {self.focus_history[-1]}, second_dispersion {self.second_dispersion_history[-1]}, third_dispersion {self.third_dispersion_history[-1]}")
                     print(f"initial directions are: focus {self.random_direction[0]}, second_dispersion {self.random_direction[1]}, third_dispersion {self.random_direction[2]}")
+                    
+                    # call function to take random directions
                     self.initial_optimize()
 
                 else:
-                    self.n_images_dir_run_count += 1
+                    self.image_group_dir_images_processed += 1
                     self.optimize_count()
+
 
                 with open(MIRROR_FILE_PATH, 'w') as file:
                     file.write(' '.join(map(str, mirror_values)))
@@ -331,9 +385,14 @@ class BetatronApplication(QtWidgets.QApplication):
 
                 QtCore.QCoreApplication.processEvents()
 
-                print(f"mean_count_per_{self.n_images}_images {self.count_history[-1]}, current values are: focus {self.focus_history[-1]}, second_dispersion {self.second_dispersion_history[-1]}, third_dispersion {self.third_dispersion_history[-1]}")
+                # print the latest mean count (helps track system)
+                print(f"Mean count for last {self.image_group} images: {self.count_history[-1]}")
+
+                # print the current parameter values which resulted in the brightness above
+                print(f"Current values are: focus {self.focus_history[-1]}, second_dispersion {self.second_dispersion_history[-1]}, third_dispersion {self.third_dispersion_history[-1]}")
                 
-                # self.upload_files() # send files to second computer
+                # after the algorithm adjusted the value and wrote it to the txt, send new txt to deformable mirror computer
+                # self.upload_files()
 
                 self.plot_curve.setData(self.iteration_data, self.count_history)
                 self.focus_curve.setData(self.der_iteration_data, self.focus_der_history)
@@ -341,8 +400,9 @@ class BetatronApplication(QtWidgets.QApplication):
                 self.third_dispersion_curve.setData(self.der_iteration_data, self.third_dispersion_der_history)
                 self.total_gradient_curve.setData(self.der_iteration_data, self.total_gradient_history)
 
-                self.n_images_count_sum = 0
-                self.mean_count_per_n_images  = 0
+                # reset variables for next optimization round
+                self.image_group_count_sum = 0
+                self.mean_count_per_image_group  = 0
                 img_mean_count = 0  
                 print('-------------')
 
