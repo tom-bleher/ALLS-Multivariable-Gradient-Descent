@@ -5,11 +5,9 @@ from ftplib import FTP
 import shutil
 import random
 from watchdog.events import FileSystemEventHandler
-from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
+from pyqtgraph.Qt import QtCore, QtWidgets
 import sys 
 import pyqtgraph as pg
-from pyqtgraph.Qt import QtGui
-from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 # there are the txt file the code adjusts and uploads 
@@ -43,12 +41,15 @@ class BetatronApplication(QtWidgets.QApplication):
         super(BetatronApplication, self).__init__(*args, **kwargs)
 
         # for how many images should the mean be taken for
-        self.image_group = 5
+        self.image_group = 2
 
         self.mean_count_per_image_group  = 0
-        self.image_group_dir_images_processed = 0
+        self.image_groups_dir_run_count = 0
+
+        # keep track of number of processed images and image groups
         self.image_groups_processed = 0
         self.images_processed = 0
+
         self.image_group_count_sum = 0  
         self.count_history = np.array([])
 
@@ -77,9 +78,8 @@ class BetatronApplication(QtWidgets.QApplication):
         
         self.count_plot_widget = pg.PlotWidget()
         self.count_plot_widget.setWindowTitle('count optimization')
-        self.count_plot_widget.setLabel('left', 'count')
-        self.count_plot_widget.setLabel('bottom', 'image_group iteration')
-        self.count_plot_widget.showGrid(x=True, y=True)
+        self.count_plot_widget.setLabel('left', 'Count')
+        self.count_plot_widget.setLabel('bottom', 'Image group iteration')
         self.count_plot_widget.show()
 
         self.main_plot_window = pg.GraphicsLayoutWidget()
@@ -87,26 +87,21 @@ class BetatronApplication(QtWidgets.QApplication):
 
         layout = self.main_plot_window.addLayout(row=0, col=0)
 
-        self.count_plot_widget = layout.addPlot(title='count vs image_group iteration')
-        self.focus_plot = layout.addPlot(title='count_focus_derivative')
-        self.second_dispersion_plot = layout.addPlot(title='count_second_dispersion_derivative')
-        self.third_dispersion_plot = layout.addPlot(title='count_third_dispersion_derivative')
-        self.total_gradient_plot = layout.addPlot(title='total_gradient')
-
-        subplots = [self.count_plot_widget, self.focus_plot, self.second_dispersion_plot, self.third_dispersion_plot, self.total_gradient_plot]
-        for subplot in subplots:
-            subplot.showGrid(x=True, y=True)
+        self.count_plot_widget = layout.addPlot(title='Count vs image group iteration')
+        self.total_gradient_plot = layout.addPlot(title='Total gradient vs image group iteration')
 
         self.plot_curve = self.count_plot_widget.plot(pen='r')
-        self.focus_curve = self.focus_plot.plot(pen='r', name='focus derivative')
-        self.second_dispersion_curve = self.second_dispersion_plot.plot(pen='g', name='second dispersion derivative')
-        self.third_dispersion_curve = self.third_dispersion_plot.plot(pen='b', name='third dispersion derivative')
-        self.total_gradient_curve = self.total_gradient_plot.plot(pen='y', name='total gradient')
+        self.total_gradient_curve = self.total_gradient_plot.plot(pen='y', name='total gradient')\
+        
+        # y labels of plots
+        self.total_gradient_plot.setLabel('left', 'Total Gradient')
+        self.count_plot_widget.setLabel('left', 'Image Group Iteration')
+
+        # x label of both plots
+        self.count_plot_widget.setLabel('bottom', 'Image Group Iteration')
+        self.total_gradient_plot.setLabel('bottom', 'Image Group Iteration')
 
         self.plot_curve.setData(self.iteration_data, self.count_history)
-        self.focus_curve.setData(self.der_iteration_data, self.focus_der_history)
-        self.second_dispersion_curve.setData(self.der_iteration_data, self.second_dispersion_der_history)
-        self.third_dispersion_curve.setData(self.der_iteration_data, self.third_dispersion_der_history)
         self.total_gradient_curve.setData(self.der_iteration_data, self.total_gradient_history)
 
     # ------------ Deformable mirror ------------ #
@@ -124,9 +119,6 @@ class BetatronApplication(QtWidgets.QApplication):
         # define global and local bounds for the deformable mirror 
         self.FOCUS_LOWER_BOUND = max(self.initial_focus - 20, -200)
         self.FOCUS_UPPER_BOUND = min(self.initial_focus + 20, 200)
-
-        #self.FOCUS_LOWER_BOUND = -999999
-        #self.FOCUS_UPPER_BOUND = 999999
 
         # set count change tolerance under which the program will consider the case optimized 
         self.count_change_tolerance = 10
@@ -146,22 +138,13 @@ class BetatronApplication(QtWidgets.QApplication):
         self.SECOND_DISPERSION_LOWER_BOUND = max(self.initial_second_dispersion - 500, 30000)
         self.SECOND_DISPERSION_UPPER_BOUND = min(self.initial_second_dispersion + 500, 40000)
 
-        #self.SECOND_DISPERSION_LOWER_BOUND = -999999
-        #self.SECOND_DISPERSION_UPPER_BOUND = 999999
-
         # -27000 initial
         self.initial_third_dispersion = dispersion_values[1] 
         self.third_dispersion_history = np.array([], dtype=int)
-        # self.THIRD_DISPERSION_LOWER_BOUND = max(self.initial_third_dispersion -2000, -30000)
-        # self.THIRD_DISPERSION_UPPER_BOUND = min(self.initial_third_dispersion + 2000, -25000)
-
-        self.THIRD_DISPERSION_LOWER_BOUND = -999999
-        self.THIRD_DISPERSION_UPPER_BOUND = 999999
+        self.THIRD_DISPERSION_LOWER_BOUND = max(self.initial_third_dispersion -2000, -30000)
+        self.THIRD_DISPERSION_UPPER_BOUND = min(self.initial_third_dispersion + 2000, -25000)
 
         self.random_direction = np.array([])
-
-        self.SECOND_DISPERSION_OPTIMIZATION_THRESHOLD = 20
-        self.THIRD_DISPERSION_OPTIMIZATION_THRESHOLD = 5
 
         self.image_handler = ImageHandler(self.process_images)
         self.file_observer = Observer()
@@ -169,6 +152,7 @@ class BetatronApplication(QtWidgets.QApplication):
         self.file_observer.start()
 
         self.random_direction = [random.choice([-1, 1]) for _ in range(4)]
+
             
     def initialize_image_files(self):
         if not self.waiting_for_images_printed:
@@ -187,7 +171,7 @@ class BetatronApplication(QtWidgets.QApplication):
 
         if self.new_files:
             self.image_files = self.new_files
-
+            
     # method used to send the new values to the mirror and dazzler computers via FTP
     def upload_files(self):
  
@@ -269,7 +253,7 @@ class BetatronApplication(QtWidgets.QApplication):
     def calc_derivatives(self):
         
         # take derivative for every parameter
-        self.count_focus_der = (self.count_history[-1] - self.count_history[-2]) / (self.focus_history[-1] -self.focus_history[-2])
+        self.count_focus_der = (self.count_history[-1] - self.count_history[-2]) / (self.focus_history[-1] - self.focus_history[-2])
         self.count_second_dispersion_der = (self.count_history[-1] - self.count_history[-2]) / (self.second_dispersion_history[-1] - self.second_dispersion_history[-2])
         self.count_third_dispersion_der = (self.count_history[-1] - self.count_history[-2]) / (self.third_dispersion_history[-1] - self.third_dispersion_history[-2])
 
@@ -281,8 +265,9 @@ class BetatronApplication(QtWidgets.QApplication):
         # add all derivatives for different parameters
         self.total_gradient = (self.focus_der_history[-1] + self.second_dispersion_der_history[-1] + self.third_dispersion_der_history[-1])
 
+        # add to respective lists for plotting and tracking
         self.total_gradient_history = np.append(self.total_gradient_history, self.total_gradient)
-        self.der_iteration_data = np.append(self.der_iteration_data, self.image_group_dir_images_processed)
+        self.der_iteration_data = np.append(self.der_iteration_data, self.image_groups_dir_run_count)
 
         # return dicts with derivatives
         return {
@@ -293,10 +278,12 @@ class BetatronApplication(QtWidgets.QApplication):
 
     # main optimization block for gradient descent 
     def optimize_count(self):
+        
+        # get count derivatives for parameters
         derivatives = self.calc_derivatives()
-
+        
         if np.abs(self.focus_learning_rate * derivatives["focus"]) > 1:
-            self.new_focus = self.focus_history[-1] - self.focus_learning_rate * self.focus_der_history[-1]
+            self.new_focus = self.focus_history[-1] + self.focus_learning_rate * self.focus_der_history[-1]
             self.new_focus = np.clip(self.new_focus, self.FOCUS_LOWER_BOUND, self.FOCUS_UPPER_BOUND)
             self.new_focus = int(round(self.new_focus))
 
@@ -304,7 +291,7 @@ class BetatronApplication(QtWidgets.QApplication):
             mirror_values[0] = self.new_focus
 
         if np.abs(self.second_dispersion_learning_rate * derivatives["second_dispersion"]) > 1:
-            self.new_second_dispersion = self.second_dispersion_history[-1] - self.second_dispersion_learning_rate * self.second_dispersion_der_history[-1]
+            self.new_second_dispersion = self.second_dispersion_history[-1] + self.second_dispersion_learning_rate * self.second_dispersion_der_history[-1]
             self.new_second_dispersion = np.clip(self.new_second_dispersion, self.SECOND_DISPERSION_LOWER_BOUND, self.SECOND_DISPERSION_UPPER_BOUND)
             self.new_second_dispersion = int(round(self.new_second_dispersion))
 
@@ -312,7 +299,7 @@ class BetatronApplication(QtWidgets.QApplication):
             dispersion_values[0] = self.new_second_dispersion
 
         if np.abs(self.third_dispersion_learning_rate * derivatives["third_dispersion"]) > 1:
-            self.new_third_dispersion = self.third_dispersion_history[-1] - self.third_dispersion_learning_rate * self.third_dispersion_der_history[-1]
+            self.new_third_dispersion = self.third_dispersion_history[-1] + self.third_dispersion_learning_rate * self.third_dispersion_der_history[-1]
             self.new_third_dispersion = np.clip(self.new_third_dispersion, self.THIRD_DISPERSION_LOWER_BOUND, self.THIRD_DISPERSION_UPPER_BOUND)
             self.new_third_dispersion = int(round(self.new_third_dispersion))
 
@@ -326,13 +313,25 @@ class BetatronApplication(QtWidgets.QApplication):
             np.abs(self.focus_learning_rate * derivatives["focus"]) < 1
         ):
             print("Convergence achieved")
-
+            
+        # stop optimizing parameter if we reached optimization resolution limit
+        
+        elif np.abs(self.third_dispersion_learning_rate * derivatives["third_dispersion"]) < 1:
+            print("Convergence achieved in third dispersion")
+        
+        elif np.abs(self.second_dispersion_learning_rate * derivatives["second_dispersion"]) < 1:
+            print("Convergence achieved in second dispersion")
+            
+        elif np.abs(self.focus_learning_rate * derivatives["focus"]) < 1:
+            print("Convergence achieved in focus")
+        
         # if the count is not changing much this means that we are near the peak 
         if np.abs(self.count_history[-1] - self.count_history[-2]) <= self.count_change_tolerance:
             print("Convergence achieved")
 
     def process_images(self, new_images):
-        self.initialize_image_files() 
+        self.initialize_image_files()
+        
         new_images = [image_path for image_path in new_images if os.path.exists(image_path)]
         new_images.sort(key=os.path.getctime)
         
@@ -372,10 +371,10 @@ class BetatronApplication(QtWidgets.QApplication):
                     self.initial_optimize()
 
                 else:
-                    self.image_group_dir_images_processed += 1
+                    self.image_groups_dir_run_count += 1
                     self.optimize_count()
 
-
+                # write values to text files
                 with open(MIRROR_FILE_PATH, 'w') as file:
                     file.write(' '.join(map(str, mirror_values)))
 
@@ -386,18 +385,16 @@ class BetatronApplication(QtWidgets.QApplication):
                 QtCore.QCoreApplication.processEvents()
 
                 # print the latest mean count (helps track system)
-                print(f"Mean count for last {self.image_group} images: {self.count_history[-1]}")
+                print(f"Mean count for last {self.image_group} images: {self.count_history[-1]:.2f}")
 
                 # print the current parameter values which resulted in the brightness above
                 print(f"Current values are: focus {self.focus_history[-1]}, second_dispersion {self.second_dispersion_history[-1]}, third_dispersion {self.third_dispersion_history[-1]}")
                 
                 # after the algorithm adjusted the value and wrote it to the txt, send new txt to deformable mirror computer
                 # self.upload_files()
-
+                
+                # update the plots
                 self.plot_curve.setData(self.iteration_data, self.count_history)
-                self.focus_curve.setData(self.der_iteration_data, self.focus_der_history)
-                self.second_dispersion_curve.setData(self.der_iteration_data, self.second_dispersion_der_history)
-                self.third_dispersion_curve.setData(self.der_iteration_data, self.third_dispersion_der_history)
                 self.total_gradient_curve.setData(self.der_iteration_data, self.total_gradient_history)
 
                 # reset variables for next optimization round
