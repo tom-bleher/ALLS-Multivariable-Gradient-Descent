@@ -7,8 +7,8 @@ What does the code do?
 - Once a new Image is detected it's processed for its mean brightness
 - The code continues, summing the individual mean of single images until we have `self.n_images` to take total average over the single averages sum
 - The code takes an initial guess for each parameter (+1 or -1)
-- The code takes the partial derivatives ($\frac{\partial C}{\partial \phi_{2}}$, $\frac{\partial C}{\partial \phi_{3}}$, $\frac{\partial C}{\partial f}$), and adds them to their respective derivative parameter history lists
-- We adjust the new parameter value relying on the latest parameter derivative using gradient ascent so that $a_{n+1}=a_{n}+\gamma \frac{\partial C(\phi_{2},\phi_{3},f)}{\partial p}, \; \text{where} \; p \in P,\; \text{and} \; P={\{\phi_{2}, \phi_{3},f\}}$
+- The code takes the partial derivatives for parameters, and adds them to their respective derivative parameter history lists
+- We adjust the new parameter value relying on the latest parameter derivative using gradient ascent so that $a_{n+1}=a_{n}+\gamma \frac{\partial C}{\partial p}, \; \text{where} p \text{is the parameter}$
 - Repeat until the function $C(\phi_{2},\phi_{3},f)$ is at maximum (or at least close to it)
 
 ### Code setup
@@ -61,33 +61,26 @@ self.DAZZLER_USER = "fastlite" # windows user of dazzler computer
 self.DAZZLER_PASSWORD = "fastlite" # windows user password of dazzler computer    
 ```
 
-## Plotting
-The code includes a number of plots to help actively track the evolution of system. 
-
-![[plot.svg|center|800]]
-- `count` vs `n_images iteration` $C(\phi_{2},\phi_{3},f)(n)$ 
-- `count_focus_derivative` vs `n_images iteration` $\frac{\partial C}{\partial f}(n)$
-- `count_second_dispersion_derivative` vs `n_images iteration` $\frac{\partial C}{\partial\phi_{2}}(n)$
-- `count_third_dispersion_derivative` vs `n_images iteration`  $\frac{\partial C}{\partial\phi_{3}}(n)$
-- `total gradient` vs `n_images iteration` ${(\frac{\partial C}{\partial f}+ \frac{\partial C}{\partial\phi_{2}}+\frac{\partial C}{\partial\phi_{3}})(n)}$
-
 ## Image processing 
 
 ##### X-ray Count
-Since we're imaging a phosphor screen, the count of X-ray from the LWFA is directly proportional to the brightness of the image. The following function calculates the average brightness per pixel of an image. 
+Since we're imaging a phosphor screen, the count of x-ray from the LWFA is directly proportional to the brightness of the image. The following function calculates the average brightness per pixel of an image. 
 
 ```python 
-def calc_xray_count(image_path):
-    original_image = cv2.imread(image_path, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_UNCHANGED | cv2.IMREAD_ANYCOLOR)
-    median_filtered_image = cv2.medianBlur(original_image, 5)
-    median_filtered_image += 1  # Avoid not counting black pixels in image
-    pixel_count = np.prod(median_filtered_image.shape)
-    img_brightness_sum = np.sum(median_filtered_image)
-    if (pixel_count > 0):
-        img_avg_brightness = (img_brightness_sum/pixel_count) -1 # Subtract back to real data
-    else:
-        img_avg_brightness = 0
-    return img_avg_brightness
+    # method to calculate count (by its brightness proxy)   
+    def calc_count_per_image(self, image_path):
+    
+        # read the image in 16 bit
+        original_image = cv2.imread(image_path, cv2.IMREAD_UNCHANGED | cv2.IMREAD_ANYDEPTH)
+        
+        # apply median blur on image
+        median_blured_image = cv2.medianBlur(original_image, 5)
+        
+        # calculate mean brightness of blured image
+        self.single_img_mean_count = median_blured_image.mean()
+        
+        # return the count (brightness of image)
+        return self.single_img_mean_count
 ```
 
 `cv2.IMREAD_ANYDEPTH` makes sure we're reading in the bit depth of the image, `16bit`.
@@ -96,56 +89,81 @@ def calc_xray_count(image_path):
 Processing the data with vanilla gradient descent to optimize the `count` function by adjusting `second_order_dispersion`, `third_order_dispersion`, and `focus` according to the real-time count reading from the camera.
 
 ```python
-def process_images(self, new_images):
-	self.initialize_image_files()
-	new_images = [image_path for image_path in new_images if os.path.exists(image_path)]
-	new_images.sort(key=os.path.getctime)
-	for image_path in new_images:
-		relative_path = os.path.relpath(image_path, self.IMG_PATH)
-		img_mean_count = self.calc_xray_count(image_path) # calculate count per image
-		self.n_images_count_sum += np.sum(img_mean_count) # add to temporary variable that includes the sum of individual mean count
-		self.run_count += 1
-		if self.run_count % self.n_images == 0: 
-			self.mean_count_per_n_images = np.mean(img_mean_count) # we take the mean of the sum of individual mean count of single images.
-			self.count_history.append(self.mean_count_per_n_images)
-			self.n_images_run_count += 1 # this is a special run count for each n_images processed
-			self.iteration_data.append(self.n_images_run_count)
-			if self.n_images_run_count == 1: # for the initial round let's tale a random guess
-				print('-------------')                    
-				self.focus_history.append(self.initial_focus)                      
-				self.second_dispersion_history.append(self.initial_second_dispersion)
-				self.third_dispersion_history.append(self.initial_third_dispersion)
-                    
-				print(f"initial values are: focus {self.focus_history[-1]}, second_dispersion {self.second_dispersion_history[-1]}, third_dispersion {self.third_dispersion_history[-1]}")
-				print(f"initial directions are: focus {self.random_direction[0]}, second_dispersion {self.random_direction[1]}, third_dispersion {self.random_direction[2]}")
-				self.initial_optimize() # take random guesses for each variable`
-				
-			else:
-				self.n_images_dir_run_count += 1 # this is a special count that's used for the plotting of the derivatives 
-				self.optimize_count() # this is the main optimization algorithm
-			with open(MIRROR_FILE_PATH, 'w') as file: # write to the mirror file
-				file.write(' '.join(map(str, mirror_values)))
-			with open(DISPERSION_FILE_PATH, 'w') as file: # write to the dazzler file
-				file.write(f'order2 = {dispersion_values[0]}\n')
-				file.write(f'order3 = {dispersion_values[1]}\n')
-			QtCore.QCoreApplication.processEvents()
+    def process_images(self, new_images):
+        self.initialize_image_files()
+        
+        new_images = [image_path for image_path in new_images if os.path.exists(image_path)]
+        new_images.sort(key=os.path.getctime)
+        
+        # loop over all new images 
+        for image_path in new_images:
+            img_mean_count = self.calc_count_per_image(image_path)
+            self.image_group_count_sum += np.sum(img_mean_count)
 
-			print(f"mean_count_per_{self.n_images}_images {self.count_history[-1]}, current values are: focus {self.focus_history[-1]}, second_dispersion {self.second_dispersion_history[-1]}, third_dispersion {self.third_dispersion_history[-1]}")
-			self.upload_files() # send files to computers
+            # keep track of the times the program ran (number of images we processed)
+            self.images_processed += 1
 
-			# update the plots 
-			self.plot_curve.setData(self.iteration_data, self.count_history)
-			self.focus_curve.setData(self.der_iteration_data, self.focus_der_history)
-			self.second_dispersion_curve.setData(self.der_iteration_data, self.second_dispersion_der_history)
-			self.third_dispersion_curve.setData(self.der_iteration_data, self.third_dispersion_der_history)
-			self.total_gradient_curve.setData(self.der_iteration_data, self.total_gradient_history)
+            # conditional to check if the desired numbers of images to mean was processed
+            if self.images_processed % self.image_group == 0:
+                # take the mean count for the number of images set
+                self.mean_count_per_image_group = np.mean(img_mean_count)
+                # append to count_history list to keep track of count through the optimization process
+                self.count_history = np.append(self.count_history, self.mean_count_per_image_group)
 
-			# reset image processing variables 
-			self.n_images_count_sum = 0
-			self.mean_count_per_n_images  = 0
-			img_mean_count = 0  
-			print('-------------')
+                # update count for 'images_group' processed (number of image groups processed)
+                self.image_groups_processed += 1
+                self.iteration_data = np.append(self.iteration_data, self.image_groups_processed)
+
+                # if we are in the first time where the algorithm needs to adjust the value
+                if self.image_groups_processed == 1:
+                    print('-------------')       
+
+                    # add initial values to lists
+                    self.focus_history = np.append(self.focus_history, self.initial_focus)      
+                    self.second_dispersion_history = np.append(self.second_dispersion_history, self.initial_second_dispersion)                   
+                    self.third_dispersion_history = np.append(self.third_dispersion_history, self.initial_third_dispersion)
+                    
+                    # print to help track the evolution of the system
+                    print(f"initial values are: focus {self.focus_history[-1]}, second_dispersion {self.second_dispersion_history[-1]}, third_dispersion {self.third_dispersion_history[-1]}")
+                    print(f"initial directions are: focus {self.random_direction[0]}, second_dispersion {self.random_direction[1]}, third_dispersion {self.random_direction[2]}")
+                    
+                    # call function to take random directions
+                    self.initial_optimize()
+
+                else:
+                    self.image_groups_dir_run_count += 1
+                    self.optimize_count()
+
+                # write values to text files
+                with open(MIRROR_FILE_PATH, 'w') as file:
+                    file.write(' '.join(map(str, mirror_values)))
+
+                with open(DISPERSION_FILE_PATH, 'w') as file:
+                    file.write(f'order2 = {dispersion_values[0]}\n')
+                    file.write(f'order3 = {dispersion_values[1]}\n')
+
+                QtCore.QCoreApplication.processEvents()
+
+                # print the latest mean count (helps track system)
+                print(f"Mean count for last {self.image_group} images: {self.count_history[-1]:.2f}")
+
+                # print the current parameter values which resulted in the brightness above
+                print(f"Current values are: focus {self.focus_history[-1]}, second_dispersion {self.second_dispersion_history[-1]}, third_dispersion {self.third_dispersion_history[-1]}")
+                
+                # after the algorithm adjusted the value and wrote it to the txt, send new txt to deformable mirror computer
+                # self.upload_files()
+                
+                # update the plots
+                self.plot_curve.setData(self.iteration_data, self.count_history)
+                self.total_gradient_curve.setData(self.der_iteration_data, self.total_gradient_history)
+
+                # reset variables for next optimization round
+                self.image_group_count_sum = 0
+                self.mean_count_per_image_group  = 0
+                img_mean_count = 0  
+                print('-------------')
 ```
+
 
 ##### Initial optimization
 ```python
@@ -217,15 +235,28 @@ self.second_dispersion_der_history.append(self.count_second_dispersion_der)
             self.third_dispersion_history.append(self.new_third_dispersion)
             dispersion_values[1] = self.third_dispersion_history[-1]
             
-        if ( # if there's a repetition in all parameters that means that the change is very small where after rounding it's the same - we have optimized the parameters
-            np.abs(self.third_dispersion_learning_rate * derivatives["third_dispersion"]) > 1 and
-            np.abs(self.second_dispersion_learning_rate * derivatives["second_dispersion"]) > 1 and
-            np.abs(self.focus_learning_rate * derivatives["focus"]) > 1
-        ):
-            print("convergence achieved")
-
-        if np.abs(self.count_history[-1] - self.count_history[-2]) <= self.tolerance:
-            print("convergence achieved")
+        # if the change in all variables is less than one (we can not take smaller steps thus this is the optimization boundry)
+        if (
+            np.abs(self.third_dispersion_learning_rate * derivatives["third_dispersion"]) < 1 and
+            np.abs(self.second_dispersion_learning_rate * derivatives["second_dispersion"]) < 1 and
+            np.abs(self.focus_learning_rate * derivatives["focus"]) < 1
+        ):
+            print("Convergence achieved")
+            
+        # stop optimizing parameter if we reached optimization resolution limit
+        
+        elif np.abs(self.third_dispersion_learning_rate * derivatives["third_dispersion"]) < 1:
+            print("Convergence achieved in third dispersion")
+        
+        elif np.abs(self.second_dispersion_learning_rate * derivatives["second_dispersion"]) < 1:
+            print("Convergence achieved in second dispersion")
+            
+        elif np.abs(self.focus_learning_rate * derivatives["focus"]) < 1:
+            print("Convergence achieved in focus")
+        
+        # if the count is not changing much this means that we are near the peak 
+        if np.abs(self.count_history[-1] - self.count_history[-2]) <= self.count_change_tolerance:
+            print("Convergence achieved")
 ```
 
 ## Communication
@@ -238,41 +269,47 @@ After the algorithm has decided on the values, we send the data (`.txt`) to the 
 After processing of the data through the algorithm, we send a command txt file to the mirror computer. In order to test the connection between the computers open `cmd` and `ping` the computers.
 
 ```python
-def upload_files(self):
-	mirror_ftp = FTP()
-	dazzler_ftp = FTP()
-	mirror_ftp.connect(host=self.MIRROR_HOST)
-	mirror_ftp.login(user=self.MIRROR_USER, passwd=self.MIRROR_PASSWORD)
-	dazzler_ftp.connect(host=self.DAZZLER_HOST)
-	dazzler_ftp.login(user=self.DAZZLER_USER, passwd=self.DAZZLER_PASSWORD)
-	mirror_files = [os.path.basename(MIRROR_FILE_PATH)]
-	dazzler_files = [os.path.basename(DISPERSION_FILE_PATH)]
+    # method used to send the new values to the mirror and dazzler computers via FTP
+    def upload_files(self):
+ 
+        mirror_files = [os.path.basename(MIRROR_FILE_PATH)]
+        dazzler_files = [os.path.basename(DISPERSION_FILE_PATH)]
 
-	for mirror_file_name in mirror_files:
-		for dazzler_file_name in dazzler_files:
-			focus_file_path = MIRROR_FILE_PATH
-			dispersion_file_path = DISPERSION_FILE_PATH
-			if os.path.isfile(focus_file_path) and os.path.isfile(dispersion_file_path):
-				copy_mirror_IMG_PATH = os.path.join('mirror_command', f'copy_{mirror_file_name}')
-				copy_dazzler_IMG_PATH = os.path.join('dazzler_command', f'copy_{dazzler_file_name}')
+        # try to send the file via ftp connection
+        try:
 
-				try:
-					os.makedirs(os.path.dirname(copy_mirror_IMG_PATH))
-					os.makedirs(os.path.dirname(copy_dazzler_IMG_PATH))
+            for mirror_file_name in mirror_files:
+                for dazzler_file_name in dazzler_files:
+                    focus_file_path = MIRROR_FILE_PATH
+                    dispersion_file_path = DISPERSION_FILE_PATH
 
-				except OSError:
-					pass
+                    if os.path.isfile(focus_file_path) and os.path.isfile(dispersion_file_path):
+                        copy_mirror_IMG_PATH = os.path.join('mirror_command', f'copy_{mirror_file_name}')
+                        copy_dazzler_IMG_PATH = os.path.join('dazzler_command', f'copy_{dazzler_file_name}')
 
-				shutil.copy(focus_file_path, copy_mirror_IMG_PATH)
-				shutil.copy(dispersion_file_path, copy_dazzler_IMG_PATH)
-				with open(copy_mirror_IMG_PATH, 'rb') as local_file:
-					mirror_ftp.storbinary(f'STOR {mirror_file_name}', local_file)
-					print(f"Uploaded to mirror FTP: {mirror_file_name}")
-				with open(copy_dazzler_IMG_PATH, 'rb') as local_file:
-					dazzler_ftp.storbinary(f'STOR {dazzler_file_name}', local_file)
-					print(f"Uploaded to dazzler FTP: {dazzler_file_name}")
-				os.remove(copy_mirror_IMG_PATH)
-				os.remove(copy_dazzler_IMG_PATH)
+                        try:
+                            os.makedirs(os.path.dirname(copy_mirror_IMG_PATH))
+                            os.makedirs(os.path.dirname(copy_dazzler_IMG_PATH))
+                        except OSError:
+                            pass
+
+                        shutil.copy(focus_file_path, copy_mirror_IMG_PATH)
+                        shutil.copy(dispersion_file_path, copy_dazzler_IMG_PATH)
+
+                        with open(copy_mirror_IMG_PATH, 'rb') as local_file:
+                            self.mirror_ftp.storbinary(f'STOR {mirror_file_name}', local_file)
+                            print(f"Uploaded to mirror FTP: {mirror_file_name}")
+
+                        with open(copy_dazzler_IMG_PATH, 'rb') as local_file:
+                            self.dazzler_ftp.storbinary(f'STOR {dazzler_file_name}', local_file)
+                            print(f"Uploaded to dazzler FTP: {dazzler_file_name}")
+
+                        os.remove(copy_mirror_IMG_PATH)
+                        os.remove(copy_dazzler_IMG_PATH)
+
+        except Exception as e:
+            print(f"Error in FTP upload: {e}")
+```
 
 ### Testing description
 This is a test for the gradient descent algorithm relying on a definition of an arbitrary function to verify the code correctly finds the maximum. Let's start with testing the code on a convex function, and proceed to test it on more complex functions with local maxima. 
@@ -280,7 +317,7 @@ This is a test for the gradient descent algorithm relying on a definition of an 
 #### Convex parabolic function
 For the purpose of testing the `count` was was simulated by the function - no images were processed.
 
-$$C(\phi_{2},\phi_{3},f)=-((\phi_{2}-42)^2 + (\phi_{3}-70)^2 + (f+972)^{2}+3^6)$$
+$$C(\phi_{2},\phi_{3},f)=-1 \cdot ((\phi_{2}-42)^2 + (\phi_{3}-70)^2 + (f+972)^{2}+3^6)$$
 $$\text{Algorithm should arrive at:} \; \phi_{2}=42,\; \phi_{3}=70,\; f=-972$$
 
 in the code this is expressed by the `count_function`:
