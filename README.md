@@ -69,7 +69,7 @@ The code includes a number of plots to help actively track the evolution of syst
 - `count_focus_derivative` vs `n_images iteration` $\frac{\partial C}{\partial f}(n)$
 - `count_second_dispersion_derivative` vs `n_images iteration` $\frac{\partial C}{\partial\phi_{2}}(n)$
 - `count_third_dispersion_derivative` vs `n_images iteration`  $\frac{\partial C}{\partial\phi_{3}}(n)$
-- `total gradient` vs `n_images iteration` ${[\frac{\partial C}{\partial f}+ \frac{\partial C}{\partial\phi_{2}}+\frac{\partial C}{\partial\phi_{3}}](n)}$
+- `total gradient` vs `n_images iteration` ${(\frac{\partial C}{\partial f}+ \frac{\partial C}{\partial\phi_{2}}+\frac{\partial C}{\partial\phi_{3}})(n)}$
 
 ## Image processing 
 
