@@ -10,7 +10,7 @@ import sys
 import pyqtgraph as pg
 from watchdog.observers import Observer
 
-# there are the txt file the code adjusts and uploads 
+# the txt files the code adjusts and uploads 
 MIRROR_FILE_PATH = r'dm_parameters.txt'
 DISPERSION_FILE_PATH = r'dazzler_parameters.txt'
 
@@ -107,7 +107,7 @@ class BetatronApplication(QtWidgets.QApplication):
     # ------------ Deformable mirror ------------ #
 
         # init -150
-        # connect to the dazzler
+        # connect to the mirror
         #self.mirror_ftp = FTP()
         #self.mirror_ftp.connect(MIRROR_HOST="192.168.200.3")
         #self.mirror_ftp.login(MIRROR_USER="Utilisateur", MIRROR_PASSWORD="alls")
@@ -125,7 +125,7 @@ class BetatronApplication(QtWidgets.QApplication):
         
     # ------------ Dazzler ------------ #
 
-        # setup ftp connection to mirror
+        # setup ftp connection to dazzler
         #self.dazzler_ftp = FTP()
         #self.dazzler_ftp.connect(MIRROR_HOST="192.168.58.7")
         #self.dazzler_ftp.login(MIRROR_USER="fastlite", MIRROR_PASSWORD="fastlite")
@@ -223,10 +223,10 @@ class BetatronApplication(QtWidgets.QApplication):
         median_blured_image = cv2.medianBlur(original_image, 5)
         
         # calculate mean brightness of blured image
-        self.single_img_mean_count = median_blured_image.mean()
+        self.single_self.img_mean_count = median_blured_image.mean()
         
         # return the count (brightness of image)
-        return self.single_img_mean_count
+        return self.single_self.img_mean_count
 
     # initial method to start optimization process
     def initial_optimize(self):
@@ -337,8 +337,8 @@ class BetatronApplication(QtWidgets.QApplication):
         
         # loop over all new images 
         for image_path in new_images:
-            img_mean_count = self.calc_count_per_image(image_path)
-            self.image_group_count_sum += np.sum(img_mean_count)
+            self.img_mean_count = self.calc_count_per_image(image_path)
+            self.image_group_count_sum += np.sum(self.img_mean_count)
 
             # keep track of the times the program ran (number of images we processed)
             self.images_processed += 1
@@ -346,7 +346,7 @@ class BetatronApplication(QtWidgets.QApplication):
             # conditional to check if the desired numbers of images to mean was processed
             if self.images_processed % self.image_group == 0:
                 # take the mean count for the number of images set
-                self.mean_count_per_image_group = np.mean(img_mean_count)
+                self.mean_count_per_image_group = np.mean(self.img_mean_count)
                 # append to count_history list to keep track of count through the optimization process
                 self.count_history = np.append(self.count_history, self.mean_count_per_image_group)
 
@@ -400,7 +400,7 @@ class BetatronApplication(QtWidgets.QApplication):
                 # reset variables for next optimization round
                 self.image_group_count_sum = 0
                 self.mean_count_per_image_group  = 0
-                img_mean_count = 0  
+                self.img_mean_count = 0  
                 print('-------------')
 
 if __name__ == "__main__":
