@@ -1,16 +1,8 @@
-import os
-import cv2
 import numpy as np
-from ftplib import FTP
-import shutil
 import random
-from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
+from pyqtgraph.Qt import QtCore, QtWidgets
 import sys 
-import time 
 import pyqtgraph as pg
-from pyqtgraph.Qt import QtGui
-
-reached_max = {"focus":False,"second_dispersion":False,"third_dispersion":False}
 
 MIRROR_FILE_PATH = r'dm_parameters.txt'
 DISPERSION_FILE_PATH = r'dazzler_parameters.txt'
@@ -31,34 +23,29 @@ class BetatronApplication(QtWidgets.QApplication):
     def __init__(self, *args, **kwargs):
         super(BetatronApplication, self).__init__(*args, **kwargs)
 
-        self.new_focus = 0  
-        self.new_second_dispersion = 0  
-        self.new_third_dispersion = 0  
-
-        self.count_grad = 0
-        self.dir_run_count = 0
-        self.run_count = 0
+        self.dir_images_processed = 0
+        self.images_processed = 0
         self.count_history = []
+        
         self.focus_learning_rate = 0.1
         self.second_dispersion_learning_rate = 0.1
         self.third_dispersion_learning_rate = 0.1
 
     # ------------ Plotting ------------ #
 
-        self.third_dispersion_der_history = []
-        self.second_dispersion_der_history = []
-        self.focus_der_history = []
-        self.total_gradient_history = []
+        # initialize lists to keep track of optimization process
+        self.third_dispersion_der_history = np.array([])
+        self.second_dispersion_der_history = np.array([])
+        self.focus_der_history = np.array([])
+        self.total_gradient_history = np.array([])
 
-        self.iteration_data = []
-        self.der_iteration_data = []
-        self.count_data = []
+        self.iteration_data = np.array([])
+        self.der_iteration_data = np.array([])
         
         self.count_plot_widget = pg.PlotWidget()
         self.count_plot_widget.setWindowTitle('count optimization')
-        self.count_plot_widget.setLabel('left', 'count')
-        self.count_plot_widget.setLabel('bottom', 'iteration')
-        self.count_plot_widget.showGrid(x=True, y=True)
+        self.count_plot_widget.setLabel('left', 'Count')
+        self.count_plot_widget.setLabel('bottom', 'Image group iteration')
         self.count_plot_widget.show()
 
         self.main_plot_window = pg.GraphicsLayoutWidget()
@@ -66,34 +53,26 @@ class BetatronApplication(QtWidgets.QApplication):
 
         layout = self.main_plot_window.addLayout(row=0, col=0)
 
-        self.count_plot_widget = layout.addPlot(title='count vs iteration')
-        self.focus_plot = layout.addPlot(title='count_focus_derivative')
-        self.second_dispersion_plot = layout.addPlot(title='count_second_dispersion_derivative')
-        self.third_dispersion_plot = layout.addPlot(title='count_third_dispersion_derivative')
-        self.total_gradient_plot = layout.addPlot(title='total_gradient')
-
-        subplots = [self.count_plot_widget, self.focus_plot, self.second_dispersion_plot, self.third_dispersion_plot, self.total_gradient_plot]
-        for subplot in subplots:
-            subplot.showGrid(x=True, y=True)
+        self.count_plot_widget = layout.addPlot(title='Count vs image group iteration')
+        self.total_gradient_plot = layout.addPlot(title='Total gradient vs image group iteration')
 
         self.plot_curve = self.count_plot_widget.plot(pen='r')
-        self.focus_curve = self.focus_plot.plot(pen='r', name='focus derivative')
-        self.second_dispersion_curve = self.second_dispersion_plot.plot(pen='g', name='second dispersion derivative')
-        self.third_dispersion_curve = self.third_dispersion_plot.plot(pen='b', name='third dispersion derivative')
-        self.total_gradient_curve = self.total_gradient_plot.plot(pen='y', name='total gradient')
+        self.total_gradient_curve = self.total_gradient_plot.plot(pen='y', name='total gradient')\
+        
+        # y labels of plots
+        self.total_gradient_plot.setLabel('left', 'Total Gradient')
+        self.count_plot_widget.setLabel('left', 'Image Group Iteration')
+
+        # x label of both plots
+        self.count_plot_widget.setLabel('bottom', 'Image Group Iteration')
+        self.total_gradient_plot.setLabel('bottom', 'Image Group Iteration')
 
         self.plot_curve.setData(self.iteration_data, self.count_history)
-        self.focus_curve.setData(self.der_iteration_data, self.focus_der_history)
-        self.second_dispersion_curve.setData(self.der_iteration_data, self.second_dispersion_der_history)
-        self.third_dispersion_curve.setData(self.der_iteration_data, self.third_dispersion_der_history)
         self.total_gradient_curve.setData(self.der_iteration_data, self.total_gradient_history)
 
     # ------------ Deformable mirror ------------ #
 
         # init -150
-        self.MIRROR_HOST = "192.168.200.3"
-        self.MIRROR_USER = "Utilisateur"
-        self.MIRROR_PASSWORD = "alls"    
 
         self.initial_focus = mirror_values[0]
         self.focus_history = []    
@@ -103,13 +82,9 @@ class BetatronApplication(QtWidgets.QApplication):
         self.FOCUS_LOWER_BOUND = -999999
         self.FOCUS_UPPER_BOUND = 999999
 
-        self.tolerance = 100
+        self.count_change_tolerance = 10
         
     # ------------ Dazzler ------------ #
-
-        self.DAZZLER_HOST = "192.168.58.7"
-        self.DAZZLER_USER = "fastlite"
-        self.DAZZLER_PASSWORD = "fastlite"
 
         # 36100 initial 
         self.initial_second_dispersion = dispersion_values[0] 
@@ -129,50 +104,7 @@ class BetatronApplication(QtWidgets.QApplication):
         self.THIRD_DISPERSION_LOWER_BOUND = -999999
         self.THIRD_DISPERSION_UPPER_BOUND = 999999
 
-        self.random_direction = []
         self.random_direction = [random.choice([-1, 1]) for _ in range(4)]
-
-    def upload_files(self):
-        mirror_ftp = FTP()
-        dazzler_ftp = FTP()
-
-        mirror_ftp.connect(host=self.MIRROR_HOST)
-        mirror_ftp.login(user=self.MIRROR_USER, passwd=self.MIRROR_PASSWORD)
-
-        dazzler_ftp.connect(host=self.DAZZLER_HOST)
-        dazzler_ftp.login(user=self.DAZZLER_USER, passwd=self.DAZZLER_PASSWORD)
-
-        mirror_files = [os.path.basename(MIRROR_FILE_PATH)]
-        dazzler_files = [os.path.basename(DISPERSION_FILE_PATH)]
-
-        for mirror_file_name in mirror_files:
-            for dazzler_file_name in dazzler_files:
-                focus_file_path = MIRROR_FILE_PATH
-                dispersion_file_path = DISPERSION_FILE_PATH
-
-                if os.path.isfile(focus_file_path) and os.path.isfile(dispersion_file_path):
-                    copy_mirror_IMG_PATH = os.path.join('mirror_command', f'copy_{mirror_file_name}')
-                    copy_dazzler_IMG_PATH = os.path.join('dazzler_command', f'copy_{dazzler_file_name}')
-
-                    try:
-                        os.makedirs(os.path.dirname(copy_mirror_IMG_PATH))
-                        os.makedirs(os.path.dirname(copy_dazzler_IMG_PATH))
-                    except OSError:
-                        pass
-
-                    shutil.copy(focus_file_path, copy_mirror_IMG_PATH)
-                    shutil.copy(dispersion_file_path, copy_dazzler_IMG_PATH)
-
-                    with open(copy_mirror_IMG_PATH, 'rb') as local_file:
-                        mirror_ftp.storbinary(f'STOR {mirror_file_name}', local_file)
-                        print(f"Uploaded to mirror FTP: {mirror_file_name}")
-
-                    with open(copy_dazzler_IMG_PATH, 'rb') as local_file:
-                        dazzler_ftp.storbinary(f'STOR {dazzler_file_name}', local_file)
-                        print(f"Uploaded to dazzler FTP: {dazzler_file_name}")
-
-                    os.remove(copy_mirror_IMG_PATH)
-                    os.remove(copy_dazzler_IMG_PATH)
 
     def count_function(self, new_focus, new_second_dispersion, new_third_dispersion):
         count_func = -1*(((new_second_dispersion - 42) ** 2) + ((new_third_dispersion - 70) ** 2) + ((new_focus + 972) ** 2)) +3e6
@@ -208,9 +140,13 @@ class BetatronApplication(QtWidgets.QApplication):
         self.total_gradient = (self.focus_der_history[-1] + self.second_dispersion_der_history[-1] + self.third_dispersion_der_history[-1])
 
         self.total_gradient_history.append(self.total_gradient)
-        self.der_iteration_data.append(self.dir_run_count)
+        self.der_iteration_data.append(self.dir_images_processed)
         
-        return {"focus":self.count_focus_der,"second_dispersion":self.count_second_dispersion_der,"third_dispersion":self.count_third_dispersion_der}
+        return {
+            "focus": self.count_focus_der,
+            "second_dispersion": self.count_second_dispersion_der,
+            "third_dispersion": self.count_third_dispersion_der
+            }
 
     def optimize_count(self):
         derivatives = self.calc_derivatives()
@@ -236,21 +172,34 @@ class BetatronApplication(QtWidgets.QApplication):
             self.third_dispersion_history.append(self.new_third_dispersion)
             dispersion_values[1] = self.third_dispersion_history[-1]
 
+        # if the change in all variables is less than one (we can not take smaller steps thus this is the optimization boundry)
         if (
-            np.abs(self.third_dispersion_learning_rate * derivatives["third_dispersion"]) > 1 and
-            np.abs(self.second_dispersion_learning_rate * derivatives["second_dispersion"]) > 1 and
-            np.abs(self.focus_learning_rate * derivatives["focus"]) > 1
+            np.abs(self.third_dispersion_learning_rate * derivatives["third_dispersion"]) < 1 and
+            np.abs(self.second_dispersion_learning_rate * derivatives["second_dispersion"]) < 1 and
+            np.abs(self.focus_learning_rate * derivatives["focus"]) < 1
         ):
-            print("convergence achieved")
-
-        # if np.abs(self.count_history[-1] - self.count_history[-2]) <= self.tolerance:
-        #     print("meow convergence achieved")
+            print("Convergence achieved")
+            
+        # stop optimizing parameter if we reached optimization resolution limit
+        
+        elif np.abs(self.third_dispersion_learning_rate * derivatives["third_dispersion"]) < 1:
+            print("Convergence achieved in third dispersion")
+        
+        elif np.abs(self.second_dispersion_learning_rate * derivatives["second_dispersion"]) < 1:
+            print("Convergence achieved in second dispersion")
+            
+        elif np.abs(self.focus_learning_rate * derivatives["focus"]) < 1:
+            print("Convergence achieved in focus")
+        
+        # if the count is not changing much this means that we are near the peak 
+        if np.abs(self.count_history[-1] - self.count_history[-2]) <= self.count_change_tolerance:
+            print("Convergence achieved")
 
     def process_images(self):
-        self.run_count += 1
-        self.iteration_data.append(self.run_count)
+        self.images_processed += 1
+        self.iteration_data.append(self.images_processed)
 
-        if self.run_count == 1:
+        if self.images_processed == 1:
 
             print('-------------')                    
             self.focus_history.append(self.initial_focus)                       
@@ -260,35 +209,30 @@ class BetatronApplication(QtWidgets.QApplication):
             self.initial_optimize()
 
         else:
-            self.dir_run_count += 1
+            self.dir_images_processed += 1
             self.img_mean_count = self.count_function(self.new_focus, self.new_second_dispersion, self.new_third_dispersion)
             self.count_history.append(self.img_mean_count)
 
             self.optimize_count()
 
-            with open(MIRROR_FILE_PATH, 'w') as file:
-                file.write(' '.join(map(str, mirror_values)))
-
-            with open(DISPERSION_FILE_PATH, 'w') as file:
-                file.write(f'order2 = {dispersion_values[0]}\n')
-                file.write(f'order3 = {dispersion_values[1]}\n')
-
-            QtCore.QCoreApplication.processEvents()
-            print(f"function_value {self.count_history[-1]}, current values are: focus {self.focus_history[-1]}, second_dispersion {self.second_dispersion_history[-1]}, third_dispersion {self.third_dispersion_history[-1]}")
-
-        # self.upload_files() # send files to second computer
-
-        self.plot_curve.setData(self.der_iteration_data, self.count_history)
-        self.focus_curve.setData(self.der_iteration_data, self.focus_der_history)
-        self.second_dispersion_curve.setData(self.der_iteration_data, self.second_dispersion_der_history)
-        self.third_dispersion_curve.setData(self.der_iteration_data, self.third_dispersion_der_history)
+        QtCore.QCoreApplication.processEvents()
+        print(f"function_value {self.count_history[-1]}, current values are: focus {self.focus_history[-1]}, second_dispersion {self.second_dispersion_history[-1]}, third_dispersion {self.third_dispersion_history[-1]}")
+                
+        # update the plots
+        self.plot_curve.setData(self.iteration_data, self.count_history)
         self.total_gradient_curve.setData(self.der_iteration_data, self.total_gradient_history)
 
+        # reset variables for next optimization round
+        self.image_group_count_sum = 0
+        self.mean_count_per_image_group  = 0
+        self.img_mean_count = 0  
         print('-------------')
+
 
 if __name__ == "__main__":
     app = BetatronApplication([])
-
+    
+    # 100 iterations for algorithm
     for _ in range(100):
         app.process_images()
 
