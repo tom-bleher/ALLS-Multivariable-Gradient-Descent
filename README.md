@@ -8,7 +8,7 @@ What does the code do?
 - The code continues, summing the individual mean of single images until we have `self.n_images` to take total average over the single averages sum
 - The code takes an initial guess for each parameter (+1 or -1)
 - The code takes the partial derivatives for parameters, and adds them to their respective derivative parameter history lists
-- We adjust the new parameter value relying on the latest parameter derivative using gradient ascent so that $a_{n+1}=a_{n}+\gamma \frac{\partial C}{\partial p}, \; \text{where} p \text{is the parameter}$
+- We adjust the new parameter value relying on the latest parameter derivative using gradient ascent so that $a_{n+1}=a_{n}+\gamma \frac{\partial C}{\partial p}$ Where $p$ is the parameter
 - Repeat until the function $C(\phi_{2},\phi_{3},f)$ is at maximum (or at least close to it)
 
 ### Code setup
