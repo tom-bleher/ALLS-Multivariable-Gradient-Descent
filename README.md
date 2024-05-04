@@ -368,4 +368,9 @@ function_value 2982964.0, current values are: focus -868, second_dispersion 37, 
 function_value 2999914.0, current values are: focus -967, second_dispersion 37, third_dispersion 64
 ```
 
+The according plots are as such:
+<br>
+<div align="center">
+<img src="Media/grad_des_test.png" width="50%" height="50%" />
+</div>
 The final line shows we approached `focus -967, second_dispersion 37, third_dispersion 64`. This is due to rounding errors, resulting in the optimized values not being exact, but we get very close. **The optimization algorithm works!**
