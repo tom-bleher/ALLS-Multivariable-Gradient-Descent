@@ -1,4 +1,6 @@
+import os
 import numpy as np
+from ftplib import FTP
 import random
 from pyqtgraph.Qt import QtCore, QtWidgets
 import sys 
@@ -23,10 +25,13 @@ class BetatronApplication(QtWidgets.QApplication):
     def __init__(self, *args, **kwargs):
         super(BetatronApplication, self).__init__(*args, **kwargs)
 
+        self.new_focus = 0  
+        self.new_second_dispersion = 0  
+        self.new_third_dispersion = 0  
+
         self.dir_images_processed = 0
         self.images_processed = 0
         self.count_history = []
-        
         self.focus_learning_rate = 0.1
         self.second_dispersion_learning_rate = 0.1
         self.third_dispersion_learning_rate = 0.1
@@ -34,16 +39,16 @@ class BetatronApplication(QtWidgets.QApplication):
     # ------------ Plotting ------------ #
 
         # initialize lists to keep track of optimization process
-        self.third_dispersion_der_history = np.array([])
-        self.second_dispersion_der_history = np.array([])
-        self.focus_der_history = np.array([])
-        self.total_gradient_history = np.array([])
+        self.third_dispersion_der_history = []
+        self.second_dispersion_der_history = []
+        self.focus_der_history = []
+        self.total_gradient_history = []
 
-        self.iteration_data = np.array([])
-        self.der_iteration_data = np.array([])
+        self.iteration_data = []
+        self.der_iteration_data = []
         
         self.count_plot_widget = pg.PlotWidget()
-        self.count_plot_widget.setWindowTitle('count optimization')
+        self.count_plot_widget.setWindowTitle('Count optimization')
         self.count_plot_widget.setLabel('left', 'Count')
         self.count_plot_widget.setLabel('bottom', 'Image group iteration')
         self.count_plot_widget.show()
@@ -147,7 +152,6 @@ class BetatronApplication(QtWidgets.QApplication):
             "second_dispersion": self.count_second_dispersion_der,
             "third_dispersion": self.count_third_dispersion_der
             }
-
     def optimize_count(self):
         derivatives = self.calc_derivatives()
 
@@ -191,9 +195,10 @@ class BetatronApplication(QtWidgets.QApplication):
         elif np.abs(self.focus_learning_rate * derivatives["focus"]) < 1:
             print("Convergence achieved in focus")
         
-        # if the count is not changing much this means that we are near the peak 
-        if np.abs(self.count_history[-1] - self.count_history[-2]) <= self.count_change_tolerance:
-            print("Convergence achieved")
+        if self.images_processed >2:
+            # if the count is not changing much this means that we are near the peak 
+            if np.abs(self.count_history[-1] - self.count_history[-2]) <= self.count_change_tolerance:
+                print("Convergence achieved")
 
     def process_images(self):
         self.images_processed += 1
@@ -215,25 +220,24 @@ class BetatronApplication(QtWidgets.QApplication):
 
             self.optimize_count()
 
-        QtCore.QCoreApplication.processEvents()
-        print(f"function_value {self.count_history[-1]}, current values are: focus {self.focus_history[-1]}, second_dispersion {self.second_dispersion_history[-1]}, third_dispersion {self.third_dispersion_history[-1]}")
-                
-        # update the plots
-        self.plot_curve.setData(self.iteration_data, self.count_history)
-        self.total_gradient_curve.setData(self.der_iteration_data, self.total_gradient_history)
+            QtCore.QCoreApplication.processEvents()
+            print(f"function_value {self.count_history[-1]}, current values are: focus {self.focus_history[-1]}, second_dispersion {self.second_dispersion_history[-1]}, third_dispersion {self.third_dispersion_history[-1]}")
 
+        # update the plots
+
+        self.plot_curve.setData(self.der_iteration_data, self.count_history)
+        self.total_gradient_curve.setData(self.der_iteration_data, self.total_gradient_history)
+        
         # reset variables for next optimization round
         self.image_group_count_sum = 0
         self.mean_count_per_image_group  = 0
         self.img_mean_count = 0  
         print('-------------')
 
-
 if __name__ == "__main__":
     app = BetatronApplication([])
-    
-    # 100 iterations for algorithm
-    for _ in range(100):
+
+    for _ in range(30):
         app.process_images()
 
     win = QtWidgets.QMainWindow()

@@ -325,9 +325,10 @@ class BetatronApplication(QtWidgets.QApplication):
         elif np.abs(self.focus_learning_rate * derivatives["focus"]) < 1:
             print("Convergence achieved in focus")
         
-        # if the count is not changing much this means that we are near the peak 
-        if np.abs(self.count_history[-1] - self.count_history[-2]) <= self.count_change_tolerance:
-            print("Convergence achieved")
+        if self.image_groups_processed >2:
+            # if the count is not changing much this means that we are near the peak 
+            if np.abs(self.count_history[-1] - self.count_history[-2]) <= self.count_change_tolerance:
+                print("Convergence achieved")
 
     def process_images(self, new_images):
         self.initialize_image_files()
