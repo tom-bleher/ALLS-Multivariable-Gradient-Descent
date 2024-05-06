@@ -319,7 +319,7 @@ After processing the data through the algorithm, we send a command txt file to t
             print(f"Error in FTP upload: {e}")
 ```
 
-### Testing description
+### Gradient Descent Optimization Test
 This is a test for the gradient descent algorithm relying on a definition of an arbitrary function to verify the code correctly finds the maximum. Let's start with testing the code on a convex function, and proceed to test it on more complex functions with local maxima. 
 
 #### Convex parabolic function
