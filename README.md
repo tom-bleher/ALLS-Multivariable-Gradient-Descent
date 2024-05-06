@@ -381,4 +381,4 @@ The according plots are as such:
 <div align="center">
 <img src="Media/grad_des_test.png"/>
 </div>
-The final line shows we approached `focus -967`, `second_dispersion 37`, `third_dispersion 64`. This is due to rounding errors, resulting in the optimized values not being exact, but we get very close.
+The final line shows we approached 'focus -967', 'second_dispersion 37', 'third_dispersion 64'. This is due to rounding errors, resulting in the optimized values not being exact, but we get very close.
