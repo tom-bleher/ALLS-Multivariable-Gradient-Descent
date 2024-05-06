@@ -52,13 +52,11 @@ MIRROR_FILE_PATH = r'mirror_command/mirror_change.txt' # this is the txt file th
 DISPERSION_FILE_PATH = r'dazzler_command/dispersion.txt' # this is the txt file the code writes to for the dazzler
 self.IMG_PATH = r'C:\Users\blehe\Desktop\Betatron\images' # this is the folder from which the code will process the images, make sure it aligns with the path specified in SpinView
 
-self.MIRROR_HOST = "192.168.200.3" # ip of deformable mirror computer
-self.MIRROR_USER = "Utilisateur" # windows user of deformable mirror computer
-self.MIRROR_PASSWORD = "alls" # windows user password of deformable mirror computer
+self.mirror_ftp.connect(MIRROR_HOST="192.168.200.3") # ip of deformable mirror computer
+self.mirror_ftp.login(MIRROR_USER="Utilisateur", MIRROR_PASSWORD="alls") # windows user and password of deformable mirror computer
 
-self.DAZZLER_HOST = "192.168.58.7" # ip of dazzler mirror computer
-self.DAZZLER_USER = "fastlite" # windows user of dazzler computer
-self.DAZZLER_PASSWORD = "fastlite" # windows user password of dazzler computer    
+self.dazzler_ftp.connect(MIRROR_HOST="192.168.58.7") # ip of dazzler mirror computer
+self.dazzler_ftp.login(MIRROR_USER="fastlite", MIRROR_PASSWORD="fastlite") # windows user and password of dazzler computer 
 ```
 
 ## Image processing 
@@ -260,7 +258,7 @@ self.second_dispersion_der_history.append(self.count_second_dispersion_der)
 ```
 
 ## Communication
-After the algorithm has decided on the values, we send the data (`.txt`) to the deformable mirror computer, and Dazzler computer using FTP. 
+After the algorithm has decided on the values, we send the data ( in '.txt` format) to the deformable mirror computer, and Dazzler computer using FTP. 
 ##### Writing values to Dazzler
 - Setup FTP connection (computer connected to network)
 - Seed `request.txt` in `D:\GZ0483-HR-670-930p`
@@ -368,4 +366,9 @@ function_value 2982964.0, current values are: focus -868, second_dispersion 37, 
 function_value 2999914.0, current values are: focus -967, second_dispersion 37, third_dispersion 64
 ```
 
+The according plots are as such:
+<br>
+<div align="center">
+<img src="Media/grad_des_test.png"/>
+</div>
 The final line shows we approached `focus -967, second_dispersion 37, third_dispersion 64`. This is due to rounding errors, resulting in the optimized values not being exact, but we get very close. **The optimization algorithm works!**
