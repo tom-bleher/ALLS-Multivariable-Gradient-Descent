@@ -3,25 +3,25 @@
 What does the code do?
 
 - Program is ran
-- Code waits for new images to appear in specified path
+- Code waits for new images to appear in the specified path
 - Once a new Image is detected it's processed for its mean brightness
-- The code continues, summing the individual mean of single images until we have `self.n_images` to take total average over the single averages sum
+- The code continues, summing the individual mean of single images until we have `self.image_group` to take the total mean over the single means sum
 - The code takes an initial guess for each parameter (+1 or -1)
-- The code takes the partial derivatives for parameters, and adds them to their respective derivative parameter history lists
+- The code takes the partial derivatives for parameters and adds them to their respective derivative parameter history lists
 - We adjust the new parameter value relying on the latest parameter derivative using gradient ascent so that $a_{n+1}=a_{n}+\gamma \frac{\partial C}{\partial p}$ Where $p$ is the parameter
 - Repeat until the function $C(\phi_{2},\phi_{3},f)$ is at maximum (or at least close to it)
 
 ### Code setup
 ##### Camera triggering and capture
-We utilize a physical pulse generator (from master clock or photodiode) for the pulse generation to synchronize the camera triggering to laser. 
+We utilize a physical pulse generator (from the master clock or photodiode) for the pulse generation to synchronize the camera triggering to the laser. 
 
 - Open the SpinView program
 - Connect camera to triggering Stanford box and computer
 - Adjust region of interest and bit depth to `16 bit`
 - Switch `trigger mode` to on
-- Click on record function 
+- Click on the record function 
 - Set format to `.tiff` and recording mode to `Streaming`
-- Select directory for the code to access 
+- Select the directory for the code to access 
 
 ##### Install imports
 The following libraries are used for the projects, ensure you have installed the necessary libraries before proceeding.
@@ -48,40 +48,33 @@ Marked by full capitalization, the code includes a number of hard coded paths, b
 
 ```python
 # computer near chamber
-MIRROR_FILE_PATH = r'mirror_command/mirror_change.txt' # this is the txt file the code writes to for the mirror
-DISPERSION_FILE_PATH = r'dazzler_command/dispersion.txt' # this is the txt file the code writes to for the dazzler
-self.IMG_PATH = r'C:\Users\blehe\Desktop\Betatron\images' # this is the folder from which the code will process the images, make sure it aligns with the path specified in SpinView
+MIRROR_FILE_PATH = r'dm_parameters.txt' # this is the txt file the code writes to
+self.IMG_PATH = r'images' # this is the folder from which the code will process the images, make sure it aligns with the path specified in SpinView
 
-self.mirror_ftp.connect(MIRROR_HOST="192.168.200.3") # ip of deformable mirror computer
-self.mirror_ftp.login(MIRROR_USER="Utilisateur", MIRROR_PASSWORD="alls") # windows user and password of deformable mirror computer
-
-self.dazzler_ftp.connect(MIRROR_HOST="192.168.58.7") # ip of dazzler mirror computer
-self.dazzler_ftp.login(MIRROR_USER="fastlite", MIRROR_PASSWORD="fastlite") # windows user and password of dazzler computer 
+self.ftp = FTP()
+self.ftp.connect(host="192.168.200.3") # ip of deformable mirror computer
+self.ftp.login(user="Utilisateur", passwd="alls") # windows user and password of deformable mirror computer
 ```
 
 ## Image processing 
 
 ##### X-ray Count
-Since we're imaging a phosphor screen, the count of x-ray from the LWFA is directly proportional to the brightness of the image. The following function calculates the average brightness per pixel of an image. 
+Since we're imaging a phosphor screen, the x-ray count is tracked using the brightness of the resulting image. The following function appluied the median blur and calculates the mean brightness per pixel of a single image.
 
 ```python 
     # method to calculate count (by its brightness proxy)   
     def calc_count_per_image(self, image_path):
-    
         # read the image in 16 bit
         original_image = cv2.imread(image_path, cv2.IMREAD_UNCHANGED | cv2.IMREAD_ANYDEPTH)
-        
         # apply median blur on image
         median_blured_image = cv2.medianBlur(original_image, 5)
-        
         # calculate mean brightness of blured image
         self.single_img_mean_count = median_blured_image.mean()
-        
         # return the count (brightness of image)
         return self.single_img_mean_count
 ```
 
-`cv2.IMREAD_ANYDEPTH` makes sure we're reading in the bit depth of the image, `16bit`.
+`cv2.IMREAD_ANYDEPTH` ensures we are reading in the bit depth of the image, `16bit`.
 
 ## Optimization algorithm
 Processing the data with vanilla gradient descent to optimize the `count` function by adjusting `second_order_dispersion`, `third_order_dispersion`, and `focus` according to the real-time count reading from the camera.
@@ -191,48 +184,64 @@ def initial_optimize(self):
 The main optimization uses the gradient descent algorithm to adjust the variables and lead to peak count. After we've reached a sufficient point (either small change in count or repetition in all three parameters) we stop the optimization algorithm.
 
 ```python
-    def calc_derivatives(self):
-	    #take the partial derivatives approximation
-        self.count_focus_der = (self.count_history[-1] - self.count_history[-2]) / (self.focus_history[-1] -self.focus_history[-2])
-        self.count_second_dispersion_der = (self.count_history[-1] - self.count_history[-2]) / (self.second_dispersion_history[-1] - self.second_dispersion_history[-2])
-        self.count_third_dispersion_der = (self.count_history[-1] - self.count_history[-2]) / (self.third_dispersion_history[-1] - self.third_dispersion_history[-2])
-        self.focus_der_history.append(self.count_focus_der)
-self.second_dispersion_der_history.append(self.count_second_dispersion_der)
-        self.third_dispersion_der_history.append(self.count_third_dispersion_der)
-        self.total_gradient = (self.focus_der_history[-1] + self.second_dispersion_der_history[-1] + self.third_dispersion_der_history[-1])
-        self.total_gradient_history.append(self.total_gradient)
-        self.der_iteration_data.append(self.n_images_dir_run_count)
-        
-        return {"focus":self.count_focus_der,"second_dispersion":self.count_second_dispersion_der,"third_dispersion":self.count_third_dispersion_der}
+    def calc_derivatives(self):
+        
+        # take derivative for every parameter
+        self.count_focus_der = (self.count_history[-1] - self.count_history[-2]) / (self.focus_history[-1] - self.focus_history[-2])
+        self.count_second_dispersion_der = (self.count_history[-1] - self.count_history[-2]) / (self.second_dispersion_history[-1] - self.second_dispersion_history[-2])
+        self.count_third_dispersion_der = (self.count_history[-1] - self.count_history[-2]) / (self.third_dispersion_history[-1] - self.third_dispersion_history[-2])
+
+        # add the derivatives to according history lists for plotting
+        self.focus_der_history = np.append(self.focus_der_history, [self.count_focus_der])
+        self.second_dispersion_der_history = np.append(self.second_dispersion_der_history, [self.count_second_dispersion_der])
+        self.third_dispersion_der_history = np.append(self.third_dispersion_der_history, [self.count_third_dispersion_der])
+
+        # add all derivatives for different parameters
+        self.total_gradient = (self.focus_der_history[-1] + self.second_dispersion_der_history[-1] + self.third_dispersion_der_history[-1])
+
+        # add to respective lists for plotting and tracking
+        self.total_gradient_history = np.append(self.total_gradient_history, self.total_gradient)
+        self.der_iteration_data = np.append(self.der_iteration_data, self.image_groups_dir_run_count)
+
+        # return dicts with derivatives
+        return {
+            "focus":self.count_focus_der,
+            "second_dispersion":self.count_second_dispersion_der,
+            "third_dispersion":self.count_third_dispersion_der
+            }
 ```
 
 ```python
-    def optimize_count(self):
-        derivatives = self.calc_derivatives() # take derivatives as seen above
+    # main optimization block for gradient descent 
+    def optimize_count(self):
+        
+        # get count derivatives for parameters
+        derivatives = self.calc_derivatives()
+        
+        if np.abs(self.focus_learning_rate * derivatives["focus"]) > 1:
+            self.new_focus = self.focus_history[-1] + self.focus_learning_rate * self.focus_der_history[-1]
+            self.new_focus = np.clip(self.new_focus, self.FOCUS_LOWER_BOUND, self.FOCUS_UPPER_BOUND)
+            self.new_focus = int(round(self.new_focus))
 
-		# if we need to take a step smaller than 1 (which becomes 1 due to the requirement of parameters being integers), this implies that we have optimized the parameter
-		
-        if np.abs(self.focus_learning_rate * derivatives["focus"]) > 1:
-            self.new_focus = self.focus_history[-1] + self.focus_learning_rate * self.focus_der_history[-1]
-            self.new_focus = np.clip(self.new_focus, self.FOCUS_LOWER_BOUND, self.FOCUS_UPPER_BOUND)
-            self.new_focus = round(self.new_focus)
-            self.focus_history.append(self.new_focus)
-            mirror_values[0] = self.focus_history[-1]
-            
-        if np.abs(self.second_dispersion_learning_rate * derivatives["second_dispersion"]) > 1:
-            self.new_second_dispersion = self.second_dispersion_history[-1] + self.second_dispersion_learning_rate * self.second_dispersion_der_history[-1]
-            self.new_second_dispersion = np.clip(self.new_second_dispersion, self.SECOND_DISPERSION_LOWER_BOUND, self.SECOND_DISPERSION_UPPER_BOUND)
-            self.new_second_dispersion = round(self.new_second_dispersion)
-            self.second_dispersion_history.append(self.new_second_dispersion)
-            dispersion_values[0] = self.second_dispersion_history[-1]
+            self.focus_history = np.append(self.focus_history, self.new_focus)
+            mirror_values[0] = self.new_focus
 
-        if np.abs(self.third_dispersion_learning_rate * derivatives["third_dispersion"]) > 1:
-            self.new_third_dispersion = self.third_dispersion_history[-1] + self.third_dispersion_learning_rate * self.third_dispersion_der_history[-1]
-            self.new_third_dispersion = np.clip(self.new_third_dispersion, self.THIRD_DISPERSION_LOWER_BOUND, self.THIRD_DISPERSION_UPPER_BOUND)
-            self.new_third_dispersion = round(self.new_third_dispersion)
-            self.third_dispersion_history.append(self.new_third_dispersion)
-            dispersion_values[1] = self.third_dispersion_history[-1]
-            
+        if np.abs(self.second_dispersion_learning_rate * derivatives["second_dispersion"]) > 1:
+            self.new_second_dispersion = self.second_dispersion_history[-1] + self.second_dispersion_learning_rate * self.second_dispersion_der_history[-1]
+            self.new_second_dispersion = np.clip(self.new_second_dispersion, self.SECOND_DISPERSION_LOWER_BOUND, self.SECOND_DISPERSION_UPPER_BOUND)
+            self.new_second_dispersion = int(round(self.new_second_dispersion))
+
+            self.second_dispersion_history = np.append(self.second_dispersion_history, self.new_second_dispersion)
+            dispersion_values[0] = self.new_second_dispersion
+
+        if np.abs(self.third_dispersion_learning_rate * derivatives["third_dispersion"]) > 1:
+            self.new_third_dispersion = self.third_dispersion_history[-1] + self.third_dispersion_learning_rate * self.third_dispersion_der_history[-1]
+            self.new_third_dispersion = np.clip(self.new_third_dispersion, self.THIRD_DISPERSION_LOWER_BOUND, self.THIRD_DISPERSION_UPPER_BOUND)
+            self.new_third_dispersion = int(round(self.new_third_dispersion))
+
+            self.third_dispersion_history = np.append(self.third_dispersion_history, self.new_third_dispersion)
+            dispersion_values[1] = self.new_third_dispersion
+        
         # if the change in all variables is less than one (we can not take smaller steps thus this is the optimization boundry)
         if (
             np.abs(self.third_dispersion_learning_rate * derivatives["third_dispersion"]) < 1 and
@@ -252,19 +261,20 @@ self.second_dispersion_der_history.append(self.count_second_dispersion_der)
         elif np.abs(self.focus_learning_rate * derivatives["focus"]) < 1:
             print("Convergence achieved in focus")
         
-        # if the count is not changing much this means that we are near the peak 
-        if np.abs(self.count_history[-1] - self.count_history[-2]) <= self.count_change_tolerance:
-            print("Convergence achieved")
+        if self.image_groups_processed >2:
+            # if the count is not changing much this means that we are near the peak 
+            if np.abs(self.count_history[-1] - self.count_history[-2]) <= self.count_change_tolerance:
+                print("Convergence achieved")
 ```
 
 ## Communication
-After the algorithm has decided on the values, we send the data ( in '.txt` format) to the deformable mirror computer, and Dazzler computer using FTP. 
+After the algorithm has decided on the values, we send the data (in '.txt` format) to the deformable mirror computer, and Dazzler computer using FTP. 
 ##### Writing values to Dazzler
 - Setup FTP connection (computer connected to network)
 - Seed `request.txt` in `D:\GZ0483-HR-670-930p`
 - `request.txt` will read from `dispersion.txt` located in the server path `C:\Users\fastlite\Desktop\commands`
 ##### Sending command
-After processing of the data through the algorithm, we send a command txt file to the mirror computer. In order to test the connection between the computers open `cmd` and `ping` the computers.
+After processing the data through the algorithm, we send a command txt file to the mirror computer. In order to test the connection between the computers open `cmd` and `ping` the computers.
 
 ```python
     # method used to send the new values to the mirror and dazzler computers via FTP
@@ -371,4 +381,4 @@ The according plots are as such:
 <div align="center">
 <img src="Media/grad_des_test.png"/>
 </div>
-The final line shows we approached `focus -967, second_dispersion 37, third_dispersion 64`. This is due to rounding errors, resulting in the optimized values not being exact, but we get very close. **The optimization algorithm works!**
+The final line shows we approached `focus -967, second_dispersion 37, third_dispersion 64`. This is due to rounding errors, resulting in the optimized values not being exact, but we get very close.
