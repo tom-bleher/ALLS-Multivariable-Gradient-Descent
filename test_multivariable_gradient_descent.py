@@ -1,14 +1,15 @@
 import os
 import numpy as np
-from ftplib import FTP
 import random
 from pyqtgraph.Qt import QtCore, QtWidgets
 import sys 
 import pyqtgraph as pg
 
+# the txt files the code adjusts and uploads 
 MIRROR_FILE_PATH = r'dm_parameters.txt'
 DISPERSION_FILE_PATH = r'dazzler_parameters.txt'
 
+# open and read the txt files and read the initial values
 with open(MIRROR_FILE_PATH, 'r') as file:
     content = file.read()
 mirror_values = list(map(int, content.split()))
@@ -29,9 +30,11 @@ class BetatronApplication(QtWidgets.QApplication):
         self.new_second_dispersion = 0  
         self.new_third_dispersion = 0  
 
-        self.dir_images_processed = 0
+        self.der_images_processed = 0
         self.images_processed = 0
         self.count_history = []
+
+        # set learning rates for the different optimization variables
         self.focus_learning_rate = 0.1
         self.second_dispersion_learning_rate = 0.1
         self.third_dispersion_learning_rate = 0.1
@@ -145,13 +148,14 @@ class BetatronApplication(QtWidgets.QApplication):
         self.total_gradient = (self.focus_der_history[-1] + self.second_dispersion_der_history[-1] + self.third_dispersion_der_history[-1])
 
         self.total_gradient_history.append(self.total_gradient)
-        self.der_iteration_data.append(self.dir_images_processed)
+        self.der_iteration_data.append(self.der_images_processed)
         
         return {
             "focus": self.count_focus_der,
             "second_dispersion": self.count_second_dispersion_der,
             "third_dispersion": self.count_third_dispersion_der
             }
+    
     def optimize_count(self):
         derivatives = self.calc_derivatives()
 
@@ -214,7 +218,7 @@ class BetatronApplication(QtWidgets.QApplication):
             self.initial_optimize()
 
         else:
-            self.dir_images_processed += 1
+            self.der_images_processed += 1
             self.img_mean_count = self.count_function(self.new_focus, self.new_second_dispersion, self.new_third_dispersion)
             self.count_history.append(self.img_mean_count)
 
@@ -224,7 +228,6 @@ class BetatronApplication(QtWidgets.QApplication):
             print(f"function_value {self.count_history[-1]}, current values are: focus {self.focus_history[-1]}, second_dispersion {self.second_dispersion_history[-1]}, third_dispersion {self.third_dispersion_history[-1]}")
 
         # update the plots
-
         self.plot_curve.setData(self.der_iteration_data, self.count_history)
         self.total_gradient_curve.setData(self.der_iteration_data, self.total_gradient_history)
         
