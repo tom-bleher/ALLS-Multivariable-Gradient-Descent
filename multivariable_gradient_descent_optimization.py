@@ -152,7 +152,6 @@ class BetatronApplication(QtWidgets.QApplication):
         self.file_observer.start()
 
         self.random_direction = [random.choice([-1, 1]) for _ in range(4)]
-
             
     def initialize_image_files(self):
         if not self.waiting_for_images_printed:
@@ -223,10 +222,10 @@ class BetatronApplication(QtWidgets.QApplication):
         median_blured_image = cv2.medianBlur(original_image, 5)
         
         # calculate mean brightness of blured image
-        self.single_self.img_mean_count = median_blured_image.mean()
+        self.single_img_mean_count = median_blured_image.mean()
         
         # return the count (brightness of image)
-        return self.single_self.img_mean_count
+        return self.single_img_mean_count
 
     # initial method to start optimization process
     def initial_optimize(self):
